@@ -240,8 +240,13 @@ simple_server_shutdown(void * cookie)
 	struct conn_list_node * node_ptr;
 
 	/* Cancel any further accepts. */
-	if (A->accept_cookie != NULL)
+	if (A->accept_cookie != NULL) {
 		network_accept_cancel(A->accept_cookie);
+		A->accept_cookie = NULL;
+	}
+
+	/* Stop drop() -> conndied() -> doaccept() from arming a new accept. */
+	A->shutdown_requested = 1;
 
 	/*
 	 * Shut down any open connections.  drop() will call
