@@ -198,7 +198,7 @@ err1:
 	*(P->status) = -1;
 
 	/* Inform the upstream that our status has changed. */
-	P->callback(P->cookie);
+	(void)(P->callback)(P->cookie);
 
 	/* Failure! */
 	return (-1);
@@ -235,7 +235,7 @@ err1:
 	*(P->status) = -1;
 
 	/* Inform the upstream that our status has changed. */
-	P->callback(P->cookie);
+	(void)(P->callback)(P->cookie);
 
 	/* Failure! */
 	return (-1);
