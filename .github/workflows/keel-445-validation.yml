@@ -1,0 +1,114 @@
+name: KEEL spiped 445 Linux validation
+
+on:
+  push:
+    branches:
+      - review/keel-445-linux-validation-20260906
+    paths:
+      - .github/workflows/keel-445-validation.yml
+
+permissions: {}
+
+jobs:
+  build-and-validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Build exact base and PR head without installing or deploying
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcc --version | head -n 1
+          make --version | head -n 1
+          openssl version
+          for stage in base head; do
+            if [ "$stage" = base ]; then
+              ref=a945f3315e35ee48c8a79af952addc1b6616db83
+            else
+              ref=56fb46f3902d394aa129e399e9739338a91cb095
+            fi
+            git init "$stage"
+            git -C "$stage" remote add origin https://github.com/woahwhattheheck/spiped.git
+            git -C "$stage" fetch --depth=1 origin "$ref"
+            git -C "$stage" checkout --detach FETCH_HEAD
+            test "$(git -C "$stage" rev-parse HEAD)" = "$ref"
+            git -C "$stage" submodule update --init --recursive
+            printf 'SOURCE %s ' "$stage"
+            git -C "$stage" rev-parse HEAD:spiped/main.c
+            if ! make -C "$stage" -j2 > "$stage-build.log" 2>&1; then
+              tail -n 160 "$stage-build.log"
+              exit 1
+            fi
+            test -x "$stage/spiped/spiped"
+            echo "BUILD $stage PASS"
+            tail -n 8 "$stage-build.log"
+          done
+      - name: Exercise only argument validation and missing-key failure
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+
+          cases = [
+              ('defaults', [], False, False),
+              ('R-only', ['-R'], False, False),
+              ('r-zero-only', ['-r', '0'], False, False),
+              ('r-default-only', ['-r', '60'], False, False),
+              ('r-nondefault-only', ['-r', '30'], False, False),
+              ('r-fraction-only', ['-r', '0.5'], False, False),
+              ('r-default-R', ['-r', '60', '-R'], False, True),
+              ('R-r-default', ['-R', '-r', '60'], False, True),
+              ('r-zero-R', ['-r', '0', '-R'], False, True),
+              ('R-r-zero', ['-R', '-r', '0'], False, True),
+              ('r-nondefault-R', ['-r', '30', '-R'], True, True),
+              ('R-r-nondefault', ['-R', '-r', '30'], True, True),
+              ('r-fraction-R', ['-r', '0.5', '-R'], True, True),
+              ('R-r-fraction', ['-R', '-r', '0.5'], True, True),
+              ('duplicate-r', ['-r', '0', '-r', '60'], True, True),
+              ('duplicate-R', ['-R', '-R'], True, True),
+          ]
+          rows = []
+          with tempfile.TemporaryDirectory(prefix='keel-spiped-445-') as tmp:
+              missing_key = Path(tmp) / 'deliberately-missing.key'
+              assert not missing_key.exists()
+              # -F prevents daemonizing; no -D. Numeric loopback addresses
+              # need no external DNS. The missing key stops execution before
+              # sock_listener(), which is after key loading in exact main.c.
+              common = ['-e', '-F', '-k', str(missing_key),
+                        '-s', '127.0.0.1:48880', '-t', '127.0.0.1:48881']
+              for stage, column in [('base', 2), ('head', 3)]:
+                  executable = Path(stage, 'spiped', 'spiped').resolve()
+                  for case in cases:
+                      name, options = case[:2]
+                      expected_usage = case[column]
+                      p = subprocess.run([str(executable), *common, *options],
+                                         capture_output=True, text=True, timeout=5)
+                      usage = 'usage:' in p.stderr.lower()
+                      key_failure = 'error reading shared secret' in p.stderr.lower()
+                      ok = p.returncode == 1 and (
+                          (usage and not key_failure) if expected_usage
+                          else (key_failure and not usage)
+                      )
+                      rows.append({'stage': stage, 'case': name, 'options': options,
+                                   'returncode': p.returncode, 'expected_usage': expected_usage,
+                                   'usage': usage, 'key_failure': key_failure,
+                                   'passed': ok, 'stderr': p.stderr})
+                      assert not missing_key.exists()
+          report = {'source_base': 'a945f3315e35ee48c8a79af952addc1b6616db83',
+                    'source_head': '56fb46f3902d394aa129e399e9739338a91cb095',
+                    'passed': sum(row['passed'] for row in rows),
+                    'total': len(rows), 'results': rows}
+          Path('keel-445-results.json').write_text(json.dumps(report, indent=2) + '\n')
+          print(json.dumps(report, indent=2))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write(f"## KEEL spiped #445\n\n{report['passed']}/{report['total']} "
+                            "CLI checks passed across the exact base and PR head.\n\n"
+                            "Both normal builds completed. No production daemon or listener "
+                            "was started; accepted options intentionally stop at a missing key.\n")
+          if not all(row['passed'] for row in rows):
+              raise SystemExit('CLI regression validation failed')
+          PY
