@@ -1,0 +1,47 @@
+name: verify-443-445
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Update apt-get
+      run: sudo apt-get update
+    - name: Install valgrind
+      run: sudo apt-get install --no-install-recommends -y valgrind
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # ---- PR #443 evidence: the existing suite still passes on the patched tree ----
+    - name: Build (patched)
+      env:
+        CC: gcc
+        CFLAGS: -std=c99 -O2 -Wall -Wextra -Werror -Wpedantic -pedantic-errors -Wno-clobbered
+      run: make
+
+    - name: make test (patched, under valgrind)
+      env:
+        USE_VALGRIND: 1
+      run: make test VERBOSE=1
+
+    # ---- PR #445 evidence: -r / -R argument validation ----
+    - name: Build CLI fixture
+      run: head -c 32 /dev/urandom > /tmp/key
+
+    - name: 'CLI cases: PATCHED'
+      run: sh ./cli_rR_cases.sh PATCHED
+
+    # ---- negative control: revert only the one-line guard, rebuild, rerun ----
+    - name: Revert the -r/-R guard to its previous form
+      run: |
+        grep -n 'opt_r_set && opt_R' spiped/main.c
+        sed -i 's/if (opt_r_set \&\& opt_R)/if ((opt_r != 60.0) \&\& opt_R)/' spiped/main.c
+        grep -n 'opt_r != 60.0' spiped/main.c
+        make clean
+        make
+
+    - name: 'CLI cases: UNPATCHED control'
+      run: sh ./cli_rR_cases.sh UNPATCHED
