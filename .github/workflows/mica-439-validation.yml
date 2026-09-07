@@ -1,0 +1,62 @@
+name: MICA PR439 DNS rollback validation
+on:
+  push:
+    branches: [review/mica-439-dns-rollback-20260906]
+    paths:
+      - tests/mica-439/**
+      - .github/workflows/mica-439-validation.yml
+  workflow_dispatch:
+permissions: {}
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Fetch pinned public sources without repository credentials
+        shell: bash
+        env:
+          REVIEW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/woahwhattheheck/spiped.git
+          git fetch --no-tags --depth=1 origin "$REVIEW_SHA"
+          git checkout --detach FETCH_HEAD
+          git fetch --no-tags --depth=1 origin a945f3315e35ee48c8a79af952addc1b6616db83 955aefcb5df089cf6d14ae6a5f2333e08a5634f7
+          mkdir -p sources results/harness
+          git worktree add --detach sources/base a945f3315e35ee48c8a79af952addc1b6616db83
+          git worktree add --detach sources/head 955aefcb5df089cf6d14ae6a5f2333e08a5634f7
+          cp tests/mica-439/* results/harness/
+          python3 -m py_compile tests/mica-439/run.py
+      - name: Install build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq > results/install.log 2>&1
+          sudo apt-get install -y -qq libssl-dev >> results/install.log 2>&1
+      - name: Build both complete applications and exact supporting libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          { uname -a; gcc --version; make --version; openssl version; } > results/toolchain.txt
+          for rev in base head; do
+            (
+              set -euo pipefail
+              cd "sources/$rev"
+              git rev-parse HEAD HEAD:lib/dnsthread/dnsthread.c
+              make -j2 CC=gcc CFLAGS='-O2 -g'
+              git diff --exit-code
+            ) > "results/build-$rev.log" 2>&1 || { tail -60 "results/build-$rev.log"; exit 1; }
+          done
+      - name: Run real-worker and event-loop rollback matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/mica-439/run.py sources results | tee results/replay.log
+      - name: Preserve full results even on a failing assertion
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mica-439-dns-rollback-validation
+          path: results/
+          retention-days: 14
