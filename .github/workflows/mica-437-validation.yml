@@ -1,0 +1,62 @@
+name: MICA PR437 stack wipe validation
+on:
+  push:
+    branches: [review/mica-437-stack-wipe-20260906]
+    paths:
+      - tests/mica-437/**
+      - .github/workflows/mica-437-validation.yml
+  workflow_dispatch:
+permissions: {}
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Fetch public pinned source without repository credentials
+        shell: bash
+        env:
+          REVIEW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/woahwhattheheck/spiped.git
+          git fetch --no-tags --depth=1 origin "$REVIEW_SHA"
+          git checkout --detach FETCH_HEAD
+          git fetch --no-tags --depth=1 origin a945f3315e35ee48c8a79af952addc1b6616db83 92f0f726b827231d31108e59cd24dcf9fe6c5a71
+          mkdir -p sources results/harness
+          git worktree add --detach sources/base a945f3315e35ee48c8a79af952addc1b6616db83
+          git worktree add --detach sources/head 92f0f726b827231d31108e59cd24dcf9fe6c5a71
+          cp tests/mica-437/* results/harness/
+          python3 -m py_compile tests/mica-437/run.py
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq > results/install.log 2>&1
+          sudo apt-get install -y -qq libssl-dev >> results/install.log 2>&1
+      - name: Build both complete applications and their actual libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          { uname -a; gcc --version; make --version; openssl version; } > results/toolchain.txt
+          for rev in base head; do
+            (
+              set -euo pipefail
+              cd "sources/$rev"
+              git rev-parse HEAD HEAD:lib/proto/proto_crypt.c
+              make -j2 CC=gcc CFLAGS='-O2 -g'
+              git diff --exit-code
+            ) > "results/build-$rev.log" 2>&1 || { tail -60 "results/build-$rev.log"; exit 1; }
+          done
+      - name: Execute key-read fault matrix and independent output oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/mica-437/run.py sources results | tee results/replay.log
+      - name: Preserve complete evidence on either outcome
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mica-437-stack-wipe-validation
+          path: results/
+          retention-days: 14
