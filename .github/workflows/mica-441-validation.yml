@@ -1,0 +1,62 @@
+name: MICA PR441 handshake cookie validation
+on:
+  push:
+    branches: [review/mica-441-handshake-wipe-20260906]
+    paths:
+      - tests/mica-441/**
+      - .github/workflows/mica-441-validation.yml
+  workflow_dispatch:
+permissions: {}
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Fetch exact public revisions without repository credentials
+        shell: bash
+        env:
+          REVIEW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/woahwhattheheck/spiped.git
+          git fetch --no-tags --depth=1 origin "$REVIEW_SHA"
+          git checkout --detach FETCH_HEAD
+          git fetch --no-tags --depth=1 origin a945f3315e35ee48c8a79af952addc1b6616db83 a04c2614978098ffd33012e9353fac8a0b025e31
+          mkdir -p sources results/harness
+          git worktree add --detach sources/base a945f3315e35ee48c8a79af952addc1b6616db83
+          git worktree add --detach sources/head a04c2614978098ffd33012e9353fac8a0b025e31
+          cp tests/mica-441/* results/harness/
+          python3 -m py_compile tests/mica-441/run.py
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq > results/install.log 2>&1
+          sudo apt-get install -y -qq libssl-dev >> results/install.log 2>&1
+      - name: Build full applications and exact supporting libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          { uname -a; gcc --version; make --version; openssl version; } > results/toolchain.txt
+          for rev in base head; do
+            (
+              set -euo pipefail
+              cd "sources/$rev"
+              git rev-parse HEAD HEAD:lib/proto/proto_handshake.c
+              make -j2 CC=gcc CFLAGS='-O2 -g'
+              git diff --exit-code
+            ) > "results/build-$rev.log" 2>&1 || { tail -60 "results/build-$rev.log"; exit 1; }
+          done
+      - name: Observe cookie wipes and retained keys through real local handshakes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/mica-441/run.py sources results | tee results/replay.log
+      - name: Preserve replay evidence on either outcome
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mica-441-handshake-cookie-validation
+          path: results/
+          retention-days: 14
