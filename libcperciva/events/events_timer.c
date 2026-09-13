@@ -25,21 +25,19 @@ static void events_timer_shutdown(void);
 
 /* Return the largest non-negative value representable by time_t. */
 static uintmax_t
-time_t_maximum(void)
+time_t_maximum(time_t minus_one)
 {
 	const size_t bits = sizeof(time_t) * CHAR_BIT;
+	const size_t uintmax_bits = sizeof(uintmax_t) * CHAR_BIT;
+	size_t value_bits;
 
-	/* If time_t is unsigned, all of its bits hold the magnitude. */
-	if ((time_t)-1 > (time_t)0) {
-		if (bits == sizeof(uintmax_t) * CHAR_BIT)
-			return (UINTMAX_MAX);
-		return (((uintmax_t)1 << bits) - 1);
-	}
+	/* An unsigned time_t uses all bits; a signed time_t reserves one. */
+	if (minus_one > (time_t)0)
+		value_bits = bits;
+	else
+		value_bits = bits - 1;
 
-	/* Signed time_t reserves one bit for the sign. */
-	if (bits == sizeof(intmax_t) * CHAR_BIT)
-		return ((uintmax_t)INTMAX_MAX);
-	return (((uintmax_t)1 << (bits - 1)) - 1);
+	return (UINTMAX_MAX >> (uintmax_bits - value_bits));
 }
 
 /* Set tv := <current time> + tdelta. */
@@ -52,7 +50,7 @@ gettimeout(struct timeval * tv, const struct timeval * tdelta)
 		goto err0;
 
 	/* Refuse to overflow time_t while constructing the absolute timeout. */
-	tmax = time_t_maximum();
+	tmax = time_t_maximum((time_t)-1);
 	if ((tdelta->tv_sec > 0) &&
 	    ((uintmax_t)tdelta->tv_sec > tmax - (uintmax_t)tv->tv_sec))
 		goto err0;
@@ -138,7 +136,7 @@ events_timer_register_double(int (* func)(void *), void * cookie,
 	uintmax_t tmax;
 
 	/* Reject values which cannot be represented safely as time_t. */
-	tmax = time_t_maximum();
+	tmax = time_t_maximum((time_t)-1);
 	if ((!isfinite(timeo)) || (timeo < 0.0) ||
 	    (timeo >= (double)tmax))
 		return (NULL);
@@ -267,6 +265,7 @@ int
 events_timer_get(struct eventrec ** r)
 {
 	struct timeval tnow;
+	const struct timeval * tv;
 	struct timerrec * t;
 
 	/* If we have no queue, we have no timers; return NULL. */
