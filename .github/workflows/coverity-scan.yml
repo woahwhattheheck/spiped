@@ -30,6 +30,7 @@ jobs:
         run: |
           script="$RUNNER_TEMP/travisci_build_coverity_scan.sh"
           curl --fail-with-body --silent --show-error --location \
+            --proto '=https' --proto-redir '=https' \
             --max-time 30 --retry 3 --retry-all-errors --retry-max-time 90 \
             "https://scan.coverity.com/scripts/travisci_build_coverity_scan.sh" \
             --output "$script"
