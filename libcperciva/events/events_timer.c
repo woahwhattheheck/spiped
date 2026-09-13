@@ -222,7 +222,7 @@ events_timer_min(struct timeval ** timeo)
 		goto done;
 	}
 
-	/* Allocate space for holding the returned pointer. */
+	/* Allocate space for holding the returned timeval. */
 	if ((*timeo = malloc(sizeof(struct timeval))) == NULL)
 		goto err0;
 
@@ -267,7 +267,7 @@ int
 events_timer_get(struct eventrec ** r)
 {
 	struct timeval tnow;
-	const struct timeval * tv;
+	struct timerrec * t;
 
 	/* If we have no queue, we have no timers; return NULL. */
 	if (Q == NULL) {
@@ -280,15 +280,15 @@ events_timer_get(struct eventrec ** r)
 		goto err0;
 
 	/* Get an expired timer, if there is one. */
-	tv = timerqueue_getmin(Q);
-	if (tv != NULL && ((tv->tv_sec < tnow.tv_sec) ||
-	    ((tv->tv_sec == tnow.tv_sec) && (tv->tv_usec <= tnow.tv_usec)))) {
-		/* An event has expired; fetch and delete it. */
-		if ((t = timerqueue_getptr(Q, tv)) == NULL)
-			goto err0;
+	t = timerqueue_getptr(Q, &tnow);
+
+	/* If there is an expired timer... */
+	if (t != NULL) {
+		/* ... pass back the eventrec and free the timer. */
 		*r = t->r;
 		free(t);
 	} else {
+		/* Otherwise, return NULL. */
 		*r = NULL;
 	}
 
