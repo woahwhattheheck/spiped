@@ -265,7 +265,6 @@ int
 events_timer_get(struct eventrec ** r)
 {
 	struct timeval tnow;
-	const struct timeval * tv;
 	struct timerrec * t;
 
 	/* If we have no queue, we have no timers; return NULL. */
