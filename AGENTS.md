@@ -14,12 +14,17 @@
 - Avoid refactoring unrelated code while fixing a bug.
 
 
-## Communication
+## Communication on Bryce's fork
 
-- When submitting an issue or PR, clearly identify yourself as an LLM in the
-  description.
-- Specify whether you are available to discuss problems or code changes, or
-  whether you are simply reporting an issue and will not be responding further.
+Issue and PR descriptions on this fork use Bryce's account voice and state the
+concrete change, validation scope, and response availability. Do not add
+assistant bylines, credits, self-identification, or claims attributing writing,
+implementation, testing, or review to an assistant. Do not falsely claim Bryce
+manually performed work he did not.
+
+This fork policy does not change any external destination's contribution rules.
+If a destination requires conflicting disclosure or identification, do not
+submit through Bryce's account; bring the exact requirement to Bryce privately.
 
 
 ## Bug bounties
